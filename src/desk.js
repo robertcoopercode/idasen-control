@@ -148,33 +148,25 @@ class Desk extends EventEmitter {
   }
 
   async performMoveTo(targetPosition) {
-    this.isMoving = true;
-
     const isMovingUp = targetPosition > this.position;
     const stopThreshold = 1.0;
 
     let lastPosition = this.position;
     let lastSpeed = 0;
     let shouldStopCounter = 0;
-    let lastCommand = 0;
 
     try {
       while (
-        this.isMoving &&
         ((isMovingUp && this.position + stopThreshold < targetPosition) ||
           (!isMovingUp && this.position - stopThreshold > targetPosition))
       ) {
-        if (lastCommand == 0 || lastCommand < +new Date() - 300) {
-          await this.ensureConnection();
-          await this.controlChar.writeAsync(
-            isMovingUp ? Desk.control().up : Desk.control().down,
-            false
-          );
-          lastCommand = +new Date();
-        }
+        await this.ensureConnection();
+        this.controlChar.write(
+          isMovingUp ? Desk.control().up : Desk.control().down,
+          true
+        );
 
-        await sleep(100);
-
+        await sleep(500);
         await this.readPosition();
 
         if (
@@ -187,16 +179,20 @@ class Desk extends EventEmitter {
         }
 
         if (shouldStopCounter >= 5) {
+          console.log("Break!")
           break;
         }
 
         lastPosition = this.position;
         lastSpeed = this.speed;
+        console.log("moving...", `position: ${this.position + stopThreshold}`, `speed: ${lastSpeed}`)
+
       }
 
       await this.ensureConnection();
-      await this.controlChar.writeAsync(Desk.control().stop, false);
-
+      console.log("Sending stop command.")
+      this.controlChar.write(Desk.control().stop, true);
+      console.log("Stopped.")
       this.isMoving = false;
     } catch (err) {
       this.isMoving = false;

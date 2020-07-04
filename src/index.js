@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 const process = require("process");
-const { spawn } = require("child_process");
+const { spawn, execFile, spawnSync, execFileSync } = require("child_process");
 const fs = require("fs");
 const net = require("net");
 const { program } = require("commander");
@@ -102,19 +102,16 @@ async function runClient() {
       console.log("Server not running");
     }
   } else {
-    // these operations want the server.
+    // Spawn server if one is not already running
     if (!(await serverIsRunning())) {
-      if (process.env.IDASEN_NO_DAEMON === "1") {
-        runServer();
-      } else {
-        const env = { ...process.env, IDASEN_START_SERVER: "1" };
-        const [_first, ...argv] = process.argv;
-        spawn(process.execPath, argv, {
-          env,
-          detached: true,
-          stdio: "ignore",
-        });
-      }
+      console.log("Spanning new process!")
+      const env = { ...process.env, IDASEN_START_SERVER: "1" };
+      const [_first, ...argv] = process.argv;
+      spawn(process.execPath, argv, {
+        env,
+        detached: true,
+        stdio: "ignore",
+      });
       await sleep(100);
     }
 
@@ -159,7 +156,8 @@ async function runClient() {
 }
 
 async function serverIsRunning() {
-  return (await readPid()) !== null;
+  const pid = await readPid();
+  return pid !== null;
 }
 
 async function readPid() {
@@ -200,10 +198,10 @@ async function ensureServer(onMessage) {
   }
 
   const server = net
-    .createServer((stream) => {
+    .createServer((connection) => {
       let buffer = "";
       let connected = true;
-      stream.on("data", async (data) => {
+      connection.on("data", async (data) => {
         buffer += data;
         while (true) {
           const newline = buffer.indexOf("\n");
@@ -223,13 +221,14 @@ async function ensureServer(onMessage) {
           let rv = await onMessage(parsedMsg);
           if (connected) {
             log("sending response", rv);
-            stream.write(JSON.stringify(rv) + "\n");
+            connection.write(JSON.stringify(rv) + "\n");
           } else {
             log("dropping response because client disconnected");
           }
         }
       });
-      stream.on("end", () => {
+      connection.on("end", () => {
+        console.log("Ending connection")
         connected = false;
       });
     })
@@ -252,21 +251,18 @@ async function sendCommand(cmd, wait) {
   wait = wait || false;
   const config = getConfig();
   return new Promise((resolve) => {
-    const client = net.createConnection({ path: config.socketPath }, () => {
-      client.write(JSON.stringify(cmd) + "\n", () => {
+    const socket = net.createConnection({ path: config.socketPath }, () => {
+      socket.write(JSON.stringify(cmd) + "\n", () => {
         if (!wait) {
           resolve(undefined);
         }
       });
     });
     if (wait) {
-      client.on("data", (data) => {
+      socket.on("data", (data) => {
         resolve(JSON.parse(data));
       });
     }
-    client.on("end", () => {
-      // nothing
-    });
   });
 }
 
